@@ -1,0 +1,57 @@
+name: Upstream Sync
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+on:
+  schedule:
+    - cron: '0 * * * *' # 每小时执行一次
+  workflow_dispatch:    # 手动触发
+
+jobs:
+  sync_latest_from_upstream:
+    name: Sync latest commits from upstream repo
+    runs-on: ubuntu-latest
+    if: ${{ github.event.repository.fork }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clean issue notice
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'close-issues'
+          labels: '🚨 Sync Fail'
+
+      - name: Upstream Sync
+        id: sync
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
+        with:
+          target_sync_branch: main
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }} # 自动生成的 GitHub token，无需手动设置
+          upstream_sync_repo: CorentinTh/it-tools
+          upstream_sync_branch: main
+          test_mode: false
+
+      - name: New commits detected action
+        if: steps.sync.outputs.has_new_commits == 'true'
+        uses: actions/github-script@v7.0.1
+        with:
+          script: |
+            github.rest.repos.createDispatchEvent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              event_type: 'deploy'
+            })
+
+      - name: Sync check
+        if: failure()
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'create-issue'
+          title: '🚨 同步失败 | Sync Fail'
+          labels: '🚨 Sync Fail'
+          body: |
+            由于上游仓库的 workflow 文件变更，导致 GitHub 自动暂停了本次自动更新，你需要手动 Sync Fork 一次
